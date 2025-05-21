@@ -1,53 +1,66 @@
 from flask import Flask, request, jsonify
 import telegram
 import os
-import json
-import gspread
+import csv
+import time
 from datetime import datetime
-from oauth2client.service_account import ServiceAccountCredentials
+import gspread
+from google.oauth2 import service_account
+import json
 
 app = Flask(__name__)
 
-# Variáveis de ambiente (setadas no Render)
-TELEGRAM_TOKEN = os.environ['TELEGRAM_TOKEN']
-CHAT_ID = os.environ['CHAT_ID']
-GSHEET_ID = os.environ['GSHEET_ID']
-GOOGLE_CREDENTIALS_JSON = os.environ['GOOGLE_CREDENTIALS_JSON']
+# Configurações
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
 
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-# Autenticando com o Google Sheets
-scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
-creds_dict = json.loads(GOOGLE_CREDENTIALS_JSON)
-credentials = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-gc = gspread.authorize(credentials)
-sheet = gc.open_by_key(GSHEET_ID).sheet1
+# Autenticação com Google Sheets
+credentials_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
+credentials_dict = json.loads(credentials_str)
+
+scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+creds = service_account.Credentials.from_service_account_info(credentials_dict, scopes=scopes)
+client = gspread.authorize(creds)
+sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1  # primeira aba
 
 @app.route('/webhook', methods=['POST'])
 def receber_webhook():
     dados = request.json
-    print("\U0001F4C4 Dados recebidos:", dados)
+    print(f"📦 Dados recebidos: {dados}")
 
-    status = dados.get("event")
-    email = dados.get("buyer", {}).get("email", "None")
+    # Extrair dados principais
+    event = dados.get("event")
+    email = dados.get("buyer", {}).get("email", "Desconhecido")
+    status = dados.get("data", {}).get("status", event)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print(f"\U0001F514 Webhook recebido | Status: {status} | Email: {email}")
+    print(f"⚠️ Webhook recebido | Status: {status} | Email: {email}")
 
-    if status in ["PURCHASE_APPROVED", "PURCHASE_COMPLETED"]:
-        mensagem = f"\u2705 Novo acesso aprovado: {email}\nBem-vindo ao grupo VIP!"
-        bot.send_message(chat_id=CHAT_ID, text=mensagem)
-        escrever_no_google_sheets(email, status)
+    # Registrar no Google Sheets
+    try:
+        sheet.append_row([timestamp, email, status])
+        print("✅ Registro adicionado ao Google Sheets.")
+    except Exception as e:
+        print(f"Erro ao escrever na planilha: {e}")
 
-    elif status in ["PURCHASE_CANCELED", "PURCHASE_REFUNDED", "CHARGEBACK"]:
-        mensagem = f"\u26a0\ufe0f Acesso cancelado: {email}\nRemova do grupo manualmente se necessário."
-        bot.send_message(chat_id=CHAT_ID, text=mensagem)
-        escrever_no_google_sheets(email, status)
+    # Enviar mensagem no grupo
+    if status in ["PURCHASE_APPROVED", "APPROVED", "COMPLETED"]:
+        msg = f"✅ Novo acesso aprovado: {email}\nBem-vindo ao grupo VIP!"
+    elif status in ["PURCHASE_CANCELED", "CANCELED", "REFUNDED", "CHARGEBACK"]:
+        msg = f"⚠️ Acesso cancelado: {email}\nRemova do grupo manualmente se necessário."
+    else:
+        msg = f"📩 Status recebido: {status} | Email: {email}"
 
-    return jsonify({"status": "recebido"}), 200
+    try:
+        bot.send_message(chat_id=CHAT_ID, text=msg)
+        print("✅ Mensagem enviada para o Telegram.")
+    except Exception as e:
+        print(f"Erro ao enviar mensagem: {e}")
 
-def escrever_no_google_sheets(email, status):
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-    sheet.append_row([agora, email, status])
+    return jsonify({"status": "ok"}), 200
 
 if __name__ == "__main__":
     app.run(debug=True)
