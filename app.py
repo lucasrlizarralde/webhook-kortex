@@ -22,6 +22,7 @@ credentials_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
 credentials_dict = json.loads(credentials_str)
 
 scopes = ["https://www.googleapis.com/auth/spreadsheets"]
+credentials_dict = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
 creds = service_account.Credentials.from_service_account_info(credentials_dict, scopes=scopes)
 client = gspread.authorize(creds)
 sheet = client.open_by_key(GOOGLE_SHEET_ID).sheet1  # primeira aba
