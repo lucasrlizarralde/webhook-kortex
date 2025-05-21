@@ -15,8 +15,8 @@ def receber_webhook():
     dados = request.json
     print("📦 Dados recebidos:", dados)  # 👈 Mostra tudo que o Hotmart enviou
 
-    status = dados.get("status")
-    email = dados.get("buyer", {}).get("email", "Desconhecido")
+    status = dados.get("event")  # Ex: 'PURCHASE_COMPLETE'
+    email = dados.get("buyer", {}).get("email")  # Está correto, mas verifique a estrutura
 
     print(f"[🔔 Webhook recebido] Status: {status} | Email: {email}")
 
