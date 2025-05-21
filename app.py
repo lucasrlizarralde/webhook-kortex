@@ -13,6 +13,7 @@ bot = telegram.Bot(token=TELEGRAM_TOKEN)
 @app.route('/webhook', methods=['POST'])
 def receber_webhook():
     dados = request.json
+    print("📦 Dados recebidos:", dados)  # 👈 Mostra tudo que o Hotmart enviou
 
     status = dados.get("status")
     email = dados.get("buyer", {}).get("email", "Desconhecido")
