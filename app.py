@@ -19,7 +19,7 @@ def receber_webhook():
     dados = request.json
     print(f"\U0001F4C4 Dados recebidos: {dados}")
 
-    status = dados.get("data", {}).get("status")
+    status = dados.get("data", {}).get("purchase", {}).get("status")
     email = dados.get("data", {}).get("buyer", {}).get("email")
 
     print(f"[Webhook recebido] Status: {status} | Email: {email}")
