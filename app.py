@@ -17,6 +17,7 @@ bot = telegram.Bot(token=TELEGRAM_TOKEN)
 @app.route("/webhook", methods=["POST"])
 def receber_webhook():
     dados = request.json
+    print(f"[📦 Dados recebidos]: {dados}")  # <--- adicionado
     status = dados.get("status")
     email = dados.get("buyer", {}).get("email")
 
