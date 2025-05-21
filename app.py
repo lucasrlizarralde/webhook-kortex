@@ -1,67 +1,57 @@
 from flask import Flask, request, jsonify
-import telegram
+import psycopg2
 import os
-import csv
-import time
 from datetime import datetime
-import gspread
-from google.oauth2 import service_account
-import json
+import telegram
 
 app = Flask(__name__)
 
-# Configurações
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("CHAT_ID")
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID")
+# Variáveis de ambiente
+DATABASE_URL = os.environ.get("DATABASE_URL")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+CHAT_ID = os.environ.get("CHAT_ID")
 
+# Telegram bot
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
-# Autenticação com Google Sheets
-credentials_str = os.getenv("GOOGLE_CREDENTIALS_JSON")
-credentials_dict = json.loads(credentials_str)
-
-scopes = ["https://www.googleapis.com/auth/spreadsheets"]
-credentials_dict = json.loads(os.getenv("GOOGLE_CREDENTIALS_JSON"))
-creds = service_account.Credentials.from_service_account_info(credentials_dict, scopes=scopes)
-client = gspread.authorize(creds)
-sheet = client.open_by_key(GOOGLE_SHEET_ID).worksheet("aprovados")
-
-@app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def receber_webhook():
     dados = request.json
-    print(f"📦 Dados recebidos: {dados}")
+    status = dados.get("status")
+    email = dados.get("buyer", {}).get("email")
 
-    # Extrair dados principais
-    event = dados.get("event")
-    email = dados.get("buyer", {}).get("email", "Desconhecido")
-    status = dados.get("data", {}).get("status", event)
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[Webhook recebido] Status: {status} | Email: {email}")
 
-    print(f"⚠️ Webhook recebido | Status: {status} | Email: {email}")
+    if email and status:
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            cursor = conn.cursor()
+            timestamp = datetime.now()
+            cursor.execute(
+                "INSERT INTO compradores (email, status, timestamp) VALUES (%s, %s, %s)",
+                (email, status, timestamp)
+            )
+            conn.commit()
+            cursor.close()
+            conn.close()
 
-    # Registrar no Google Sheets
-    try:
-        sheet.append_row([timestamp, email, status])
-        print("✅ Registro adicionado ao Google Sheets.")
-    except Exception as e:
-        print(f"Erro ao escrever na planilha: {e}")
+            # Envia mensagem para o Telegram
+            if status.lower() in ["approved", "completed", "purchase_approved"]:
+                mensagem = f"\u2705 Novo acesso aprovado: {email}"
+            elif status.lower() in ["canceled", "refunded", "chargeback", "purchase_canceled"]:
+                mensagem = f"\u26a0\ufe0f Acesso cancelado: {email}"
+            else:
+                mensagem = f"\ud83d\udcc8 Status desconhecido para: {email}"
 
-    # Enviar mensagem no grupo
-    if status in ["PURCHASE_APPROVED", "APPROVED", "COMPLETED"]:
-        msg = f"✅ Novo acesso aprovado: {email}\nBem-vindo ao grupo VIP!"
-    elif status in ["PURCHASE_CANCELED", "CANCELED", "REFUNDED", "CHARGEBACK"]:
-        msg = f"⚠️ Acesso cancelado: {email}\nRemova do grupo manualmente se necessário."
-    else:
-        msg = f"📩 Status recebido: {status} | Email: {email}"
+            bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-    try:
-        bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("✅ Mensagem enviada para o Telegram.")
-    except Exception as e:
-        print(f"Erro ao enviar mensagem: {e}")
+            return jsonify({"mensagem": "Dados salvos e mensagem enviada."}), 200
 
-    return jsonify({"status": "ok"}), 200
+        except Exception as e:
+            print(f"Erro ao salvar no banco ou enviar mensagem: {e}")
+            return jsonify({"erro": "Falha ao processar."}), 500
+
+    return jsonify({"erro": "Dados incompletos."}), 400
 
 if __name__ == "__main__":
     app.run(debug=True)
