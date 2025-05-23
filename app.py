@@ -31,22 +31,25 @@ def enviar_email_para_cliente(destinatario):
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(FROM_EMAIL, FROM_EMAIL_PASSWORD)
             smtp.send_message(msg)
-        print(f"E-mail enviado para {destinatario}")
+        print(f"✅ E-mail enviado para {destinatario}")
     except Exception as e:
-        print(f"Erro ao enviar e-mail: {e}")
+        print(f"❌ Erro ao enviar e-mail: {e}")
 
 @app.route("/webhook", methods=["POST"])
 def receber_webhook():
-    dados = request.json
+    dados = request.get_json(force=True, silent=True)
     print(f"📄 Dados recebidos: {dados}")
 
-    status = dados.get("data", {}).get("status")
+    # Extração correta para Hotmart subscription webhook
+    purchase = dados.get("data", {}).get("purchase", {})
+    status = purchase.get("status")
     email = dados.get("data", {}).get("buyer", {}).get("email")
 
     print(f"[Webhook recebido] Status: {status} | Email: {email}")
 
     if email and status:
         try:
+            # Salva no banco Neon
             conn = psycopg2.connect(DATABASE_URL)
             cursor = conn.cursor()
             timestamp = datetime.now()
@@ -58,21 +61,24 @@ def receber_webhook():
             cursor.close()
             conn.close()
 
-            # Envia mensagem para o Telegram
-            if status.lower() in ["approved", "completed", "purchase_approved"]:
+            # Decide mensagem e ações
+            status_lower = status.lower()
+            if status_lower in ["approved", "completed", "purchase_approved"]:
                 mensagem = f"✅ Novo acesso aprovado: {email}"
                 enviar_email_para_cliente(email)
-            elif status.lower() in ["canceled", "refunded", "chargeback", "purchase_canceled"]:
+            elif status_lower in ["canceled", "refunded", "chargeback", "purchase_canceled"]:
                 mensagem = f"⚠️ Acesso cancelado: {email}"
             else:
-                mensagem = f"📈 Status desconhecido para: {email}"
+                mensagem = f"📈 Status não tratado: {status} para {email}"
 
+            # Envia notificação no Telegram
             bot.send_message(chat_id=CHAT_ID, text=mensagem)
+            print(f"📬 Mensagem Telegram enviada: {mensagem}")
 
-            return jsonify({"mensagem": "Dados salvos e mensagem enviada."}), 200
+            return jsonify({"mensagem": "Processado com sucesso."}), 200
 
         except Exception as e:
-            print(f"Erro ao salvar no banco ou enviar mensagem: {e}")
+            print(f"❌ Erro ao processar webhook: {e}")
             return jsonify({"erro": "Falha ao processar."}), 500
 
     return jsonify({"erro": "Dados incompletos."}), 400
