@@ -3,6 +3,8 @@ import psycopg2
 import os
 from datetime import datetime
 import telegram
+import smtplib
+from email.message import EmailMessage
 
 app = Flask(__name__)
 
@@ -10,16 +12,35 @@ app = Flask(__name__)
 DATABASE_URL = os.environ.get("DATABASE_URL")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
+FROM_EMAIL = os.environ.get("FROM_EMAIL")
+FROM_EMAIL_PASSWORD = os.environ.get("FROM_EMAIL_PASSWORD")
 
 # Telegram bot
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
+def enviar_email_para_cliente(destinatario):
+    msg = EmailMessage()
+    msg["Subject"] = "Acesso ao grupo VIP"
+    msg["From"] = FROM_EMAIL
+    msg["To"] = destinatario
+    msg.set_content(
+        "Olá! 👋\n\nParabéns pela sua compra!\n\nPara acessar o grupo VIP, fale com nosso bot clicando neste link: https://t.me/SeuBotUsername\n\nDepois, envie seu e-mail para validação.\n\nEsse link é exclusivo para você. Não compartilhe.\n\nAbraços,\nEquipe Kortex Signals"
+    )
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(FROM_EMAIL, FROM_EMAIL_PASSWORD)
+            smtp.send_message(msg)
+        print(f"E-mail enviado para {destinatario}")
+    except Exception as e:
+        print(f"Erro ao enviar e-mail: {e}")
+
 @app.route("/webhook", methods=["POST"])
 def receber_webhook():
     dados = request.json
-    print(f"\U0001F4C4 Dados recebidos: {dados}")
+    print(f"📄 Dados recebidos: {dados}")
 
-    status = dados.get("data", {}).get("purchase", {}).get("status")
+    status = dados.get("data", {}).get("status")
     email = dados.get("data", {}).get("buyer", {}).get("email")
 
     print(f"[Webhook recebido] Status: {status} | Email: {email}")
@@ -39,11 +60,12 @@ def receber_webhook():
 
             # Envia mensagem para o Telegram
             if status.lower() in ["approved", "completed", "purchase_approved"]:
-                mensagem = f"\u2705 Novo acesso aprovado: {email}"
+                mensagem = f"✅ Novo acesso aprovado: {email}"
+                enviar_email_para_cliente(email)
             elif status.lower() in ["canceled", "refunded", "chargeback", "purchase_canceled"]:
-                mensagem = f"\u26a0\ufe0f Acesso cancelado: {email}"
+                mensagem = f"⚠️ Acesso cancelado: {email}"
             else:
-                mensagem = f"\ud83d\udcc8 Status desconhecido para: {email}"
+                mensagem = f"📈 Status desconhecido para: {email}"
 
             bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
